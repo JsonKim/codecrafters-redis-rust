@@ -82,7 +82,15 @@ fn main() {
                                     Some(_) => "slave",
                                     None => "master",
                                 };
-                                let message = make_bulk_string(&format!("role:{}", role));
+
+                                let info = [
+                                    format!("role:{}", role),
+                                    "master_replid:8371b4fb1155b71f4a04d3e1bc3e18c4a990aeeb"
+                                        .to_string(),
+                                    "master_repl_offset:0".to_string(),
+                                ]
+                                .join("\r\n");
+                                let message = make_bulk_string(&info);
                                 if let Err(e) = handle_client(&stream, &message) {
                                     eprintln!("Error handling client: {}", e);
                                 }
