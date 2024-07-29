@@ -1,13 +1,13 @@
-use std::collections::HashMap;
 use std::io::{Error, Read, Write};
 use std::net::{TcpListener, TcpStream};
-use std::sync::{Arc, RwLock};
 
 use command::{parse_command, RedisCommand};
 use resp_parser::parse_resp;
+use store::Store;
 
 mod command;
 mod resp_parser;
+mod store;
 
 fn handle_client(mut stream: &TcpStream, message: &str) -> Result<(), Error> {
     stream.write(message.as_bytes())?;
@@ -17,12 +17,12 @@ fn handle_client(mut stream: &TcpStream, message: &str) -> Result<(), Error> {
 
 fn main() {
     let listener = TcpListener::bind("127.0.0.1:6379").unwrap();
-    let store = Arc::new(RwLock::new(HashMap::new()));
+    let store = Store::new();
 
     for stream in listener.incoming() {
         match stream {
             Ok(mut stream) => {
-                let store = Arc::clone(&store);
+                let store = store.clone();
                 std::thread::spawn(move || {
                     println!("accepted new connection");
                     loop {
@@ -47,14 +47,12 @@ fn main() {
                                 }
                             }
                             RedisCommand::Set(key, value) => {
-                                let mut store = store.write().unwrap();
-                                store.insert(key, value);
+                                store.set(key, value);
                                 if let Err(e) = handle_client(&stream, "+OK\r\n") {
                                     eprintln!("Error handling client: {}", e);
                                 }
                             }
                             RedisCommand::Get(key) => {
-                                let store = store.read().unwrap();
                                 let value = store.get(&key).unwrap();
                                 let message = format!("${}\r\n{}\r\n", value.len(), value);
                                 if let Err(e) = handle_client(&stream, &message) {
