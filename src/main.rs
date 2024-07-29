@@ -1,23 +1,15 @@
 use std::io::{Error, Read, Write};
 use std::net::{TcpListener, TcpStream};
 
-use clap::{arg, Parser};
+use cli::parse_cli;
 use command::{parse_command, RedisCommand};
 use resp_parser::parse_resp;
 use store::Store;
 
+mod cli;
 mod command;
 mod resp_parser;
 mod store;
-
-#[derive(Parser, Debug)]
-struct Args {
-    #[arg(long, default_value_t = 6379)]
-    port: u16,
-
-    #[arg(long)]
-    replicaof: Option<String>,
-}
 
 fn make_bulk_string(data: &str) -> String {
     format!("${}\r\n{}\r\n", data.len(), data)
@@ -30,7 +22,7 @@ fn handle_client(mut stream: &TcpStream, message: &str) -> Result<(), Error> {
 }
 
 fn main() {
-    let args = Args::parse();
+    let args = parse_cli();
     let listener = TcpListener::bind(format!("127.0.0.1:{}", args.port)).unwrap();
     let store = Store::new();
 
