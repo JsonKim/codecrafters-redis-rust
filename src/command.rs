@@ -4,8 +4,17 @@ use crate::resp_parser::RespData;
 pub enum RedisCommand {
     Ping,
     Echo(String),
-    Set(String, String),
+    Set(String, String, Option<u64>),
     Get(String),
+}
+
+fn parse_px(args: &[RespData]) -> Option<u64> {
+    match args {
+        [RespData::BulkString(px), RespData::BulkString(ms)] if px.to_uppercase() == "PX" => {
+            ms.parse().ok()
+        }
+        _ => None,
+    }
 }
 
 pub fn parse_command(data: &RespData) -> Option<RedisCommand> {
@@ -30,8 +39,9 @@ pub fn parse_command(data: &RespData) -> Option<RedisCommand> {
             _ => None,
         },
         "SET" => match args {
-            [RespData::BulkString(key), RespData::BulkString(value), _rest @ ..] => {
-                Some(RedisCommand::Set(key.clone(), value.clone()))
+            [RespData::BulkString(key), RespData::BulkString(value), rest @ ..] => {
+                let px = parse_px(rest);
+                Some(RedisCommand::Set(key.clone(), value.clone(), px))
             }
             _ => None,
         },

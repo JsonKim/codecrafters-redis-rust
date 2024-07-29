@@ -46,15 +46,17 @@ fn main() {
                                     eprintln!("Error handling client: {}", e);
                                 }
                             }
-                            RedisCommand::Set(key, value) => {
-                                store.set(key, value);
+                            RedisCommand::Set(key, value, px) => {
+                                store.set(key, value, px);
                                 if let Err(e) = handle_client(&stream, "+OK\r\n") {
                                     eprintln!("Error handling client: {}", e);
                                 }
                             }
                             RedisCommand::Get(key) => {
-                                let value = store.get(&key).unwrap();
-                                let message = format!("${}\r\n{}\r\n", value.len(), value);
+                                let message = store
+                                    .get(&key)
+                                    .map(|v| format!("${}\r\n{}\r\n", v.len(), v))
+                                    .unwrap_or("$-1\r\n".to_string());
                                 if let Err(e) = handle_client(&stream, &message) {
                                     eprintln!("Error handling client: {}", e);
                                 }
