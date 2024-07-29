@@ -14,6 +14,13 @@ mod store;
 struct Args {
     #[arg(long, default_value_t = 6379)]
     port: u16,
+
+    #[arg(long)]
+    replicaof: Option<String>,
+}
+
+fn make_bulk_string(data: &str) -> String {
+    format!("${}\r\n{}\r\n", data.len(), data)
 }
 
 fn handle_client(mut stream: &TcpStream, message: &str) -> Result<(), Error> {
@@ -30,6 +37,7 @@ fn main() {
     for stream in listener.incoming() {
         match stream {
             Ok(mut stream) => {
+                let replicaof = args.replicaof.clone();
                 let store = store.clone();
                 std::thread::spawn(move || {
                     println!("accepted new connection");
@@ -70,7 +78,11 @@ fn main() {
                                 }
                             }
                             RedisCommand::Info => {
-                                let message = "$11\r\nrole:master\r\n".to_string();
+                                let role = match replicaof {
+                                    Some(_) => "slave",
+                                    None => "master",
+                                };
+                                let message = make_bulk_string(&format!("role:{}", role));
                                 if let Err(e) = handle_client(&stream, &message) {
                                     eprintln!("Error handling client: {}", e);
                                 }
