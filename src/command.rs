@@ -14,53 +14,31 @@ pub fn parse_command(data: &RespData) -> Option<RedisCommand> {
         _ => return None,
     };
 
-    let cmd = match array.get(0) {
-        Some(RespData::BulkString(s)) => s,
+    let (cmd, args) = array.split_first().unwrap();
+    let cmd = match cmd {
+        RespData::BulkString(s) => s,
         _ => return None,
     };
 
     match cmd.to_uppercase().as_str() {
-        "PING" => {
-            if array.len() == 1 {
-                Some(RedisCommand::Ping)
-            } else {
-                None
+        "PING" => match args {
+            [] => Some(RedisCommand::Ping),
+            _ => None,
+        },
+        "ECHO" => match args {
+            [RespData::BulkString(message)] => Some(RedisCommand::Echo(message.clone())),
+            _ => None,
+        },
+        "SET" => match args {
+            [RespData::BulkString(key), RespData::BulkString(value), _rest @ ..] => {
+                Some(RedisCommand::Set(key.clone(), value.clone()))
             }
-        }
-        "ECHO" => {
-            if array.len() == 2 {
-                match array.get(1) {
-                    Some(RespData::BulkString(message)) => {
-                        Some(RedisCommand::Echo(message.clone()))
-                    }
-                    _ => None,
-                }
-            } else {
-                None
-            }
-        }
-        "SET" => {
-            if array.len() == 3 {
-                match (array.get(1), array.get(2)) {
-                    (Some(RespData::BulkString(key)), Some(RespData::BulkString(value))) => {
-                        Some(RedisCommand::Set(key.clone(), value.clone()))
-                    }
-                    _ => None,
-                }
-            } else {
-                None
-            }
-        }
-        "GET" => {
-            if array.len() == 2 {
-                match array.get(1) {
-                    Some(RespData::BulkString(key)) => Some(RedisCommand::Get(key.clone())),
-                    _ => None,
-                }
-            } else {
-                None
-            }
-        }
+            _ => None,
+        },
+        "GET" => match args {
+            [RespData::BulkString(key)] => Some(RedisCommand::Get(key.clone())),
+            _ => None,
+        },
         _ => None,
     }
 }
