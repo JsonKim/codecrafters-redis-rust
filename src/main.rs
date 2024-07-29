@@ -1,6 +1,7 @@
 use std::io::{Error, Read, Write};
 use std::net::{TcpListener, TcpStream};
 
+use clap::{arg, Parser};
 use command::{parse_command, RedisCommand};
 use resp_parser::parse_resp;
 use store::Store;
@@ -9,6 +10,12 @@ mod command;
 mod resp_parser;
 mod store;
 
+#[derive(Parser, Debug)]
+struct Args {
+    #[arg(long, default_value_t = 6379)]
+    port: u16,
+}
+
 fn handle_client(mut stream: &TcpStream, message: &str) -> Result<(), Error> {
     stream.write(message.as_bytes())?;
     stream.flush()?;
@@ -16,7 +23,8 @@ fn handle_client(mut stream: &TcpStream, message: &str) -> Result<(), Error> {
 }
 
 fn main() {
-    let listener = TcpListener::bind("127.0.0.1:6379").unwrap();
+    let args = Args::parse();
+    let listener = TcpListener::bind(format!("127.0.0.1:{}", args.port)).unwrap();
     let store = Store::new();
 
     for stream in listener.incoming() {
