@@ -23,6 +23,15 @@ fn handle_client(mut stream: &TcpStream, message: &str) -> Result<(), Error> {
 
 fn main() {
     let args = parse_cli();
+
+    let replicaof = args.replicaof.as_ref();
+    let _ = replicaof.map(|replica| {
+        let stream = TcpStream::connect(format!("{}:{}", replica.host, replica.port)).unwrap();
+        let message = "*1\r\n$4\r\nPING\r\n";
+        handle_client(&stream, &message).unwrap();
+        stream
+    });
+
     let listener = TcpListener::bind(format!("127.0.0.1:{}", args.port)).unwrap();
     let store = Store::new();
 
