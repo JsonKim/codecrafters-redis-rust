@@ -69,6 +69,12 @@ fn main() {
                                     eprintln!("Error handling client: {}", e);
                                 }
                             }
+                            RedisCommand::Info => {
+                                let message = "$11\r\nrole:master\r\n".to_string();
+                                if let Err(e) = handle_client(&stream, &message) {
+                                    eprintln!("Error handling client: {}", e);
+                                }
+                            }
                         }
                     }
                 });

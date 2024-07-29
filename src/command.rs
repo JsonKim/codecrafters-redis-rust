@@ -6,6 +6,7 @@ pub enum RedisCommand {
     Echo(String),
     Set(String, String, Option<u64>),
     Get(String),
+    Info,
 }
 
 fn parse_px(args: &[RespData]) -> Option<u64> {
@@ -47,6 +48,10 @@ pub fn parse_command(data: &RespData) -> Option<RedisCommand> {
         },
         "GET" => match args {
             [RespData::BulkString(key)] => Some(RedisCommand::Get(key.clone())),
+            _ => None,
+        },
+        "INFO" => match args {
+            [RespData::BulkString(role)] if role == "replication" => Some(RedisCommand::Info),
             _ => None,
         },
         _ => None,
