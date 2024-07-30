@@ -1,4 +1,4 @@
-use std::io::Read;
+use std::io::{Error, ErrorKind, Read, Write};
 use std::net::TcpListener;
 
 use cli::parse_cli;
@@ -17,6 +17,22 @@ mod tcp;
 
 fn make_bulk_string(data: &str) -> String {
     format!("${}\r\n{}\r\n", data.len(), data)
+}
+
+fn decode_hex(s: &str) -> Result<Vec<u8>, Error> {
+    if s.len() % 2 != 0 {
+        return Err(Error::new(
+            ErrorKind::InvalidInput,
+            "Odd number of hex digits",
+        ));
+    }
+
+    (0..s.len())
+        .step_by(2)
+        .map(|i| {
+            u8::from_str_radix(&s[i..i + 2], 16).map_err(|e| Error::new(ErrorKind::InvalidInput, e))
+        })
+        .collect()
 }
 
 fn main() {
@@ -99,6 +115,14 @@ fn main() {
                                 if let Err(e) = send_message_to_client(&stream, &message) {
                                     eprintln!("Error handling client: {}", e);
                                 }
+
+                                let file_content = "524544495330303131fa0972656469732d76657205372e322e30fa0a72656469732d62697473c040fa056374696d65c26d08bc65fa08757365642d6d656dc2b0c41000fa08616f662d62617365c000fff06e3bfec0ff5aa2";
+                                let file_content = decode_hex(file_content).unwrap();
+                                stream
+                                    .write(format!("${}\r\n", file_content.len()).as_bytes())
+                                    .unwrap();
+                                stream.write(&file_content).unwrap();
+                                stream.flush().unwrap();
                             }
                         }
                     }
