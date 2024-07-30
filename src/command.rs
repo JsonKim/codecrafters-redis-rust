@@ -7,6 +7,7 @@ pub enum RedisCommand {
     Set(String, String, Option<u64>),
     Get(String),
     Info,
+    ReplConf,
 }
 
 fn parse_px(args: &[RespData]) -> Option<u64> {
@@ -54,6 +55,7 @@ pub fn parse_command(data: &RespData) -> Option<RedisCommand> {
             [RespData::BulkString(role)] if role == "replication" => Some(RedisCommand::Info),
             _ => None,
         },
+        "REPLCONF" => Some(RedisCommand::ReplConf),
         _ => None,
     }
 }

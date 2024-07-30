@@ -1,36 +1,28 @@
-use std::io::{Error, Read, Write};
-use std::net::{TcpListener, TcpStream};
+use std::io::Read;
+use std::net::TcpListener;
 
 use cli::parse_cli;
 use command::{parse_command, RedisCommand};
+use replica::main_of_replica;
 use resp_parser::parse_resp;
 use store::Store;
+use tcp::send_message_to_client;
 
 mod cli;
 mod command;
+mod replica;
 mod resp_parser;
 mod store;
+mod tcp;
 
 fn make_bulk_string(data: &str) -> String {
     format!("${}\r\n{}\r\n", data.len(), data)
 }
 
-fn handle_client(mut stream: &TcpStream, message: &str) -> Result<(), Error> {
-    stream.write(message.as_bytes())?;
-    stream.flush()?;
-    Ok(())
-}
-
 fn main() {
-    let args = parse_cli();
+    main_of_replica();
 
-    let replicaof = args.replicaof.as_ref();
-    let _ = replicaof.map(|replica| {
-        let stream = TcpStream::connect(format!("{}:{}", replica.host, replica.port)).unwrap();
-        let message = "*1\r\n$4\r\nPING\r\n";
-        handle_client(&stream, &message).unwrap();
-        stream
-    });
+    let args = parse_cli();
 
     let listener = TcpListener::bind(format!("127.0.0.1:{}", args.port)).unwrap();
     let store = Store::new();
@@ -53,19 +45,19 @@ fn main() {
                         let command = parse_command(&resp).unwrap();
                         match command {
                             RedisCommand::Ping => {
-                                if let Err(e) = handle_client(&stream, "+PONG\r\n") {
+                                if let Err(e) = send_message_to_client(&stream, "+PONG\r\n") {
                                     eprintln!("Error handling client: {}", e);
                                 }
                             }
                             RedisCommand::Echo(message) => {
                                 let message = format!("+{}\r\n", message);
-                                if let Err(e) = handle_client(&stream, &message) {
+                                if let Err(e) = send_message_to_client(&stream, &message) {
                                     eprintln!("Error handling client: {}", e);
                                 }
                             }
                             RedisCommand::Set(key, value, px) => {
                                 store.set(key, value, px);
-                                if let Err(e) = handle_client(&stream, "+OK\r\n") {
+                                if let Err(e) = send_message_to_client(&stream, "+OK\r\n") {
                                     eprintln!("Error handling client: {}", e);
                                 }
                             }
@@ -74,7 +66,7 @@ fn main() {
                                     .get(&key)
                                     .map(|v| format!("${}\r\n{}\r\n", v.len(), v))
                                     .unwrap_or("$-1\r\n".to_string());
-                                if let Err(e) = handle_client(&stream, &message) {
+                                if let Err(e) = send_message_to_client(&stream, &message) {
                                     eprintln!("Error handling client: {}", e);
                                 }
                             }
@@ -92,7 +84,12 @@ fn main() {
                                 ]
                                 .join("\r\n");
                                 let message = make_bulk_string(&info);
-                                if let Err(e) = handle_client(&stream, &message) {
+                                if let Err(e) = send_message_to_client(&stream, &message) {
+                                    eprintln!("Error handling client: {}", e);
+                                }
+                            }
+                            RedisCommand::ReplConf => {
+                                if let Err(e) = send_message_to_client(&stream, "+OK\r\n") {
                                     eprintln!("Error handling client: {}", e);
                                 }
                             }
