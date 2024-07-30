@@ -22,5 +22,8 @@ pub fn main_of_replica() {
         let message = format!("*3\r\n$8\r\nREPLCONF\r\n$4\r\ncapa\r\n$6\r\npsync2\r\n");
         send_message_to_client(&stream, &message).unwrap();
         let _ = stream.read(&mut [0; 128]);
+
+        let message = "*3\r\n$5\r\nPSYNC\r\n$1\r\n?\r\n$2\r\n-1\r\n";
+        send_message_to_client(&stream, &message).unwrap();
     });
 }
