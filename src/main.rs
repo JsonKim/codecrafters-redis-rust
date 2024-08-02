@@ -1,5 +1,6 @@
 use std::io::{Error, ErrorKind, Read, Write};
-use std::net::TcpListener;
+use std::net::{TcpListener, TcpStream};
+use std::sync::{Arc, Mutex};
 
 use cli::parse_cli;
 use command::{parse_command, RedisCommand};
@@ -43,11 +44,15 @@ fn main() {
     let listener = TcpListener::bind(format!("127.0.0.1:{}", args.port)).unwrap();
     let store = Store::new();
 
+    let cloned_client: Arc<Mutex<Option<TcpStream>>> = Arc::new(Mutex::new(None));
+
     for stream in listener.incoming() {
         match stream {
             Ok(mut stream) => {
                 let replicaof = args.replicaof.clone();
                 let store = store.clone();
+                let cloned_client = Arc::clone(&cloned_client);
+
                 std::thread::spawn(move || {
                     println!("accepted new connection");
                     loop {
@@ -75,6 +80,12 @@ fn main() {
                                 store.set(key, value, px);
                                 if let Err(e) = send_message_to_client(&stream, "+OK\r\n") {
                                     eprintln!("Error handling client: {}", e);
+                                }
+
+                                let mut cloned_client_lock = cloned_client.lock().unwrap();
+                                if let Some(ref mut cloned_client_stream) = *cloned_client_lock {
+                                    cloned_client_stream.write_all(&buf[..size]).unwrap();
+                                    cloned_client_stream.flush().unwrap();
                                 }
                             }
                             RedisCommand::Get(key) => {
@@ -123,6 +134,9 @@ fn main() {
                                     .unwrap();
                                 stream.write(&file_content).unwrap();
                                 stream.flush().unwrap();
+
+                                let mut cloned_client_lock = cloned_client.lock().unwrap();
+                                *cloned_client_lock = Some(stream.try_clone().unwrap());
                             }
                         }
                     }
