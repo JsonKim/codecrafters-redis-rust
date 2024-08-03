@@ -34,7 +34,33 @@ fn run_client(tx: &Sender<Message>, host: &str, port: u16) {
     let mut input = Vec::new();
 
     loop {
-        let next_input = if input.is_empty() {
+        let current_input = if input.is_empty() {
+            let mut buf = [0; 1024];
+            let bytes_read = stream.read(&mut buf).unwrap();
+
+            if bytes_read == 0 {
+                println!("Server closed the connection");
+                break;
+            }
+
+            buf[..bytes_read].to_vec()
+        } else {
+            input.clone()
+        };
+
+        let (next_input, resp) = parse_resp(&current_input).unwrap();
+        if parse_command(&resp).is_some() {
+            input = current_input;
+            break;
+        } else {
+            input = next_input.to_vec();
+        }
+    }
+
+    let mut offset = 0;
+
+    loop {
+        let current_input = if input.is_empty() {
             let mut buf = [0; 1024];
             let bytes_read = stream.read(&mut buf).unwrap();
 
@@ -48,21 +74,27 @@ fn run_client(tx: &Sender<Message>, host: &str, port: u16) {
             input
         };
 
-        let (next_input, resp) = parse_resp(&next_input).unwrap();
+        let (next_input, resp) = parse_resp(&current_input).unwrap();
         input = next_input.to_vec();
 
-        if let Some(command) = parse_command(&resp) {
-            match command {
-                RedisCommand::ReplConf(ReplConf::GetAck) => {
-                    let message = "*3\r\n$8\r\nREPLCONF\r\n$3\r\nACK\r\n$1\r\n0\r\n";
-                    send_message_to_client(&stream, &message).unwrap();
-                }
-                RedisCommand::Set(key, value, px) => {
-                    tx.send(Message::Set(key, value, px)).unwrap();
-                }
-                _ => {}
+        let command = parse_command(&resp).unwrap();
+        match command {
+            RedisCommand::ReplConf(ReplConf::GetAck) => {
+                let message = format!(
+                    "*3\r\n$8\r\nREPLCONF\r\n$3\r\nACK\r\n${}\r\n{}\r\n",
+                    offset.to_string().len(),
+                    offset
+                );
+
+                send_message_to_client(&stream, &message).unwrap();
             }
+            RedisCommand::Set(key, value, px) => {
+                tx.send(Message::Set(key, value, px)).unwrap();
+            }
+            _ => {}
         }
+
+        offset += current_input.len();
     }
 }
 
