@@ -94,7 +94,7 @@ fn run_client(tx: &Sender<Message>, host: &str, port: u16) {
             _ => {}
         }
 
-        offset += current_input.len();
+        offset += current_input.len() - input.len();
     }
 }
 
