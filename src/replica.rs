@@ -24,11 +24,26 @@ fn run_client(host: &str, port: u16) {
 
     let message = "*3\r\n$5\r\nPSYNC\r\n$1\r\n?\r\n$2\r\n-1\r\n";
     send_message_to_client(&stream, &message).unwrap();
+
+    loop {
+        let mut buffer = [0; 1024];
+        let bytes_read = stream.read(&mut buffer).unwrap();
+
+        if bytes_read == 0 {
+            println!("Server closed the connection");
+            break;
+        }
+
+        let received = String::from_utf8_lossy(&buffer[..bytes_read]);
+        println!("Received: {}", received);
+    }
 }
 
 pub fn main_of_replica() {
-    let args = parse_cli();
+    std::thread::spawn(|| {
+        let args = parse_cli();
 
-    args.replicaof
-        .map(|replica| run_client(&replica.host, replica.port));
+        args.replicaof
+            .map(|replica| run_client(&replica.host, replica.port));
+    });
 }
