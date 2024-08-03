@@ -50,6 +50,23 @@ fn parse_bulk_string(input: &str) -> IResult<&str, RespData> {
     }
 }
 
+pub fn parse_bulk_bytes(input: &[u8]) -> IResult<&[u8], RespData> {
+    let (input, len_bytes) = delimited(char('$'), take_until("\r\n"), tag("\r\n"))(input)?;
+    let len_str = core::str::from_utf8(len_bytes).map_err(|_| {
+        nom::Err::Failure(nom::error::Error::new(input, nom::error::ErrorKind::Verify))
+    })?;
+    let len = len_str.parse::<i64>().map_err(|_| {
+        nom::Err::Failure(nom::error::Error::new(input, nom::error::ErrorKind::Verify))
+    })?;
+
+    if len == -1 {
+        Ok((input, RespData::BulkStringNull))
+    } else {
+        let (input, _) = take(len as usize)(input)?;
+        Ok((input, RespData::BulkStringNull))
+    }
+}
+
 fn parse_array(input: &str) -> IResult<&str, RespData> {
     let (input, len_str) = delimited(char('*'), take_until("\r\n"), tag("\r\n"))(input)?;
     let len = len_str.parse::<i64>().map_err(|_| {
@@ -93,6 +110,12 @@ mod tests {
     }
 
     #[test]
+    fn bulkbytes_ok_and_remain_input() {
+        let res = parse_bulk_bytes(b"$4\r\nPING123");
+        assert_eq!(res, Ok((&b"123"[..], RespData::BulkStringNull)));
+    }
+
+    #[test]
     fn array_has_one_element() {
         let res = parse_array("*1\r\n$4\r\nPING\r\n");
         assert_eq!(
@@ -126,6 +149,22 @@ mod tests {
             res,
             Ok((
                 "",
+                RespData::Array(vec![
+                    RespData::BulkString("ECHO".to_string()),
+                    RespData::Integer(1000),
+                    RespData::BulkString("Hello".to_string()),
+                ])
+            ))
+        );
+    }
+
+    #[test]
+    fn has_remain_input() {
+        let res = parse_array("*3\r\n$4\r\nECHO\r\n:1000\r\n$5\r\nHello\r\n*3\r\n$4\r\nECHO\r\n:1000\r\n$5\r\nHello\r\n");
+        assert_eq!(
+            res,
+            Ok((
+                "*3\r\n$4\r\nECHO\r\n:1000\r\n$5\r\nHello\r\n",
                 RespData::Array(vec![
                     RespData::BulkString("ECHO".to_string()),
                     RespData::Integer(1000),
