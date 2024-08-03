@@ -19,6 +19,8 @@ mod tcp;
 enum Message {
     NewConnection(TcpStream),
     Data(Vec<u8>),
+    Set(String, String, Option<u64>),
+    Get(TcpStream, String),
 }
 
 fn make_bulk_string(data: &str) -> String {
@@ -42,17 +44,15 @@ fn decode_hex(s: &str) -> Result<Vec<u8>, Error> {
 }
 
 fn main() {
-    main_of_replica();
-
-    let args = parse_cli();
-
-    let listener = TcpListener::bind(format!("127.0.0.1:{}", args.port)).unwrap();
-    let store = Store::new();
+    let listener = TcpListener::bind(format!("127.0.0.1:{}", parse_cli().port)).unwrap();
 
     let (tx, rx) = mpsc::channel();
 
+    main_of_replica(&tx);
+
     let _ = std::thread::spawn(move || {
         let mut replicas = vec![];
+        let store = Store::new();
 
         for message in rx {
             match message {
@@ -65,6 +65,18 @@ fn main() {
                         replica.write_all(&data).unwrap();
                     }
                 }
+                Message::Set(key, value, px) => {
+                    store.set(key, value, px);
+                }
+                Message::Get(stream, key) => {
+                    let message = store
+                        .get(&key)
+                        .map(|v| format!("${}\r\n{}\r\n", v.len(), v))
+                        .unwrap_or("$-1\r\n".to_string());
+                    if let Err(e) = send_message_to_client(&stream, &message) {
+                        eprintln!("Error handling client: {}", e);
+                    }
+                }
             }
         }
     });
@@ -72,8 +84,6 @@ fn main() {
     for stream in listener.incoming() {
         match stream {
             Ok(mut stream) => {
-                let replicaof = args.replicaof.clone();
-                let store = store.clone();
                 let tx = tx.clone();
 
                 std::thread::spawn(move || {
@@ -100,7 +110,7 @@ fn main() {
                                 }
                             }
                             RedisCommand::Set(key, value, px) => {
-                                store.set(key, value, px);
+                                tx.send(Message::Set(key, value, px)).unwrap();
                                 if let Err(e) = send_message_to_client(&stream, "+OK\r\n") {
                                     eprintln!("Error handling client: {}", e);
                                 }
@@ -108,16 +118,11 @@ fn main() {
                                 tx.send(Message::Data(buf[..size].to_vec())).unwrap();
                             }
                             RedisCommand::Get(key) => {
-                                let message = store
-                                    .get(&key)
-                                    .map(|v| format!("${}\r\n{}\r\n", v.len(), v))
-                                    .unwrap_or("$-1\r\n".to_string());
-                                if let Err(e) = send_message_to_client(&stream, &message) {
-                                    eprintln!("Error handling client: {}", e);
-                                }
+                                tx.send(Message::Get(stream.try_clone().unwrap(), key))
+                                    .unwrap();
                             }
                             RedisCommand::Info => {
-                                let role = match replicaof {
+                                let role = match parse_cli().replicaof {
                                     Some(_) => "slave",
                                     None => "master",
                                 };
