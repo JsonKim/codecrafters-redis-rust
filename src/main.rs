@@ -1,6 +1,6 @@
 use std::io::{Error, ErrorKind, Read, Write};
 use std::net::{TcpListener, TcpStream};
-use std::sync::{Arc, Mutex};
+use std::sync::mpsc;
 
 use cli::parse_cli;
 use command::{parse_command, RedisCommand};
@@ -15,6 +15,11 @@ mod replica;
 mod resp_parser;
 mod store;
 mod tcp;
+
+enum Message {
+    NewConnection(TcpStream),
+    Data(Vec<u8>),
+}
 
 fn make_bulk_string(data: &str) -> String {
     format!("${}\r\n{}\r\n", data.len(), data)
@@ -44,14 +49,32 @@ fn main() {
     let listener = TcpListener::bind(format!("127.0.0.1:{}", args.port)).unwrap();
     let store = Store::new();
 
-    let cloned_client: Arc<Mutex<Option<TcpStream>>> = Arc::new(Mutex::new(None));
+    let (tx, rx) = mpsc::channel();
+
+    let _ = std::thread::spawn(move || {
+        let mut replicas = vec![];
+
+        for message in rx {
+            match message {
+                Message::NewConnection(stream) => {
+                    println!("New connection established");
+                    replicas.push(stream);
+                }
+                Message::Data(data) => {
+                    for replica in &mut replicas {
+                        replica.write_all(&data).unwrap();
+                    }
+                }
+            }
+        }
+    });
 
     for stream in listener.incoming() {
         match stream {
             Ok(mut stream) => {
                 let replicaof = args.replicaof.clone();
                 let store = store.clone();
-                let cloned_client = Arc::clone(&cloned_client);
+                let tx = tx.clone();
 
                 std::thread::spawn(move || {
                     println!("accepted new connection");
@@ -82,11 +105,7 @@ fn main() {
                                     eprintln!("Error handling client: {}", e);
                                 }
 
-                                let mut cloned_client_lock = cloned_client.lock().unwrap();
-                                if let Some(ref mut cloned_client_stream) = *cloned_client_lock {
-                                    cloned_client_stream.write_all(&buf[..size]).unwrap();
-                                    cloned_client_stream.flush().unwrap();
-                                }
+                                tx.send(Message::Data(buf[..size].to_vec())).unwrap();
                             }
                             RedisCommand::Get(key) => {
                                 let message = store
@@ -135,8 +154,8 @@ fn main() {
                                 stream.write(&file_content).unwrap();
                                 stream.flush().unwrap();
 
-                                let mut cloned_client_lock = cloned_client.lock().unwrap();
-                                *cloned_client_lock = Some(stream.try_clone().unwrap());
+                                tx.send(Message::NewConnection(stream.try_clone().unwrap()))
+                                    .unwrap();
                             }
                         }
                     }
