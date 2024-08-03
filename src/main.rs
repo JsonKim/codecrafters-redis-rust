@@ -44,6 +44,8 @@ fn decode_hex(s: &str) -> Result<Vec<u8>, Error> {
 }
 
 fn main() {
+    println!("ver: 1");
+
     let listener = TcpListener::bind(format!("127.0.0.1:{}", parse_cli().port)).unwrap();
 
     let (tx, rx) = mpsc::channel();
