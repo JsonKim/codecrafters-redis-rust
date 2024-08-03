@@ -44,8 +44,6 @@ fn decode_hex(s: &str) -> Result<Vec<u8>, Error> {
 }
 
 fn main() {
-    println!("ver: 3");
-
     let listener = TcpListener::bind(format!("127.0.0.1:{}", parse_cli().port)).unwrap();
 
     let (tx, rx) = mpsc::channel();
@@ -97,7 +95,7 @@ fn main() {
                             break;
                         }
 
-                        let resp = parse_resp(&String::from_utf8_lossy(&buf)).unwrap().1;
+                        let resp = parse_resp(&buf[..size]).unwrap().1;
                         let command = parse_command(&resp).unwrap();
                         match command {
                             RedisCommand::Ping => {
