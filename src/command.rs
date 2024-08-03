@@ -1,13 +1,20 @@
 use crate::resp_parser::RespData;
 
 #[derive(Debug, PartialEq)]
+pub enum ReplConf {
+    ListeningPort(u16),
+    Capa,
+    GetAck,
+}
+
+#[derive(Debug, PartialEq)]
 pub enum RedisCommand {
     Ping,
     Echo(String),
     Set(String, String, Option<u64>),
     Get(String),
     Info,
-    ReplConf,
+    ReplConf(ReplConf),
     PSync,
 }
 
@@ -56,7 +63,20 @@ pub fn parse_command(data: &RespData) -> Option<RedisCommand> {
             [RespData::BulkString(role)] if role == "replication" => Some(RedisCommand::Info),
             _ => None,
         },
-        "REPLCONF" => Some(RedisCommand::ReplConf),
+        "REPLCONF" => match args {
+            [RespData::BulkString(conf), RespData::BulkString(value)] => {
+                match conf.to_uppercase().as_str() {
+                    "LISTENING-PORT" => {
+                        let port = value.parse().ok()?;
+                        Some(RedisCommand::ReplConf(ReplConf::ListeningPort(port)))
+                    }
+                    "CAPA" => Some(RedisCommand::ReplConf(ReplConf::Capa)),
+                    "GETACK" => Some(RedisCommand::ReplConf(ReplConf::GetAck)),
+                    _ => None,
+                }
+            }
+            _ => None,
+        },
         "PSYNC" => Some(RedisCommand::PSync),
         _ => None,
     }

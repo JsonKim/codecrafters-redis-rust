@@ -2,7 +2,7 @@ use std::{io::Read, net::TcpStream, sync::mpsc::Sender};
 
 use crate::{
     cli::parse_cli,
-    command::{parse_command, RedisCommand},
+    command::{parse_command, RedisCommand, ReplConf},
     resp_parser::parse_resp,
     tcp::send_message_to_client,
     Message,
@@ -42,9 +42,15 @@ fn run_client(tx: &Sender<Message>, host: &str, port: u16) {
             break;
         }
 
+        println!("Received: {}", String::from_utf8_lossy(&buf[..bytes_read]));
+
         let resp = parse_resp(&String::from_utf8_lossy(&buf)).unwrap().1;
         let command = parse_command(&resp).unwrap();
         match command {
+            RedisCommand::ReplConf(ReplConf::GetAck) => {
+                let message = "*3\r\n$8\r\nREPLCONF\r\n$3\r\nACK\r\n$1\r\n0\r\n";
+                send_message_to_client(&stream, &message).unwrap();
+            }
             RedisCommand::Set(key, value, px) => {
                 tx.send(Message::Set(key, value, px)).unwrap();
             }

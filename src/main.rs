@@ -44,7 +44,7 @@ fn decode_hex(s: &str) -> Result<Vec<u8>, Error> {
 }
 
 fn main() {
-    println!("ver: 1");
+    println!("ver: 3");
 
     let listener = TcpListener::bind(format!("127.0.0.1:{}", parse_cli().port)).unwrap();
 
@@ -141,7 +141,7 @@ fn main() {
                                     eprintln!("Error handling client: {}", e);
                                 }
                             }
-                            RedisCommand::ReplConf => {
+                            RedisCommand::ReplConf(_) => {
                                 if let Err(e) = send_message_to_client(&stream, "+OK\r\n") {
                                     eprintln!("Error handling client: {}", e);
                                 }
