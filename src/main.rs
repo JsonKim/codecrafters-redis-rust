@@ -21,6 +21,7 @@ enum Message {
     Data(Vec<u8>),
     Set(String, String, Option<u64>),
     Get(TcpStream, String),
+    WaitHandshake(TcpStream),
 }
 
 fn make_bulk_string(data: &str) -> String {
@@ -73,6 +74,12 @@ fn main() {
                         .get(&key)
                         .map(|v| format!("${}\r\n{}\r\n", v.len(), v))
                         .unwrap_or("$-1\r\n".to_string());
+                    if let Err(e) = send_message_to_client(&stream, &message) {
+                        eprintln!("Error handling client: {}", e);
+                    }
+                }
+                Message::WaitHandshake(stream) => {
+                    let message = format!(":{}\r\n", replicas.len());
                     if let Err(e) = send_message_to_client(&stream, &message) {
                         eprintln!("Error handling client: {}", e);
                     }
@@ -163,9 +170,8 @@ fn main() {
                                     .unwrap();
                             }
                             RedisCommand::Wait(_numreplicas, _timeout) => {
-                                if let Err(e) = send_message_to_client(&stream, ":0\r\n") {
-                                    eprintln!("Error handling client: {}", e);
-                                }
+                                tx.send(Message::WaitHandshake(stream.try_clone().unwrap()))
+                                    .unwrap();
                             }
                         }
                     }
