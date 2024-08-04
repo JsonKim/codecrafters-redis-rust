@@ -18,6 +18,7 @@ mod tcp;
 
 enum Message {
     NewConnection(TcpStream),
+    DisconnectReplica(TcpStream),
     Data(Vec<u8>),
     Set(String, String, Option<u64>),
     Get(TcpStream, String),
@@ -61,6 +62,9 @@ fn main() {
                     println!("New connection established");
                     replicas.push(stream);
                 }
+                Message::DisconnectReplica(stream) => {
+                    replicas.retain(|r| r.peer_addr().unwrap() != stream.peer_addr().unwrap());
+                }
                 Message::Data(data) => {
                     for replica in &mut replicas {
                         replica.write_all(&data).unwrap();
@@ -95,6 +99,8 @@ fn main() {
 
                 std::thread::spawn(move || {
                     println!("accepted new connection");
+
+                    let mut is_replica = false;
                     loop {
                         let mut buf = [0; 1024];
                         let size = stream.read(&mut buf).unwrap_or(0);
@@ -166,6 +172,7 @@ fn main() {
                                 stream.write(&file_content).unwrap();
                                 stream.flush().unwrap();
 
+                                is_replica = true;
                                 tx.send(Message::NewConnection(stream.try_clone().unwrap()))
                                     .unwrap();
                             }
@@ -174,6 +181,11 @@ fn main() {
                                     .unwrap();
                             }
                         }
+                    }
+
+                    if is_replica {
+                        tx.send(Message::DisconnectReplica(stream.try_clone().unwrap()))
+                            .unwrap();
                     }
                 });
             }
