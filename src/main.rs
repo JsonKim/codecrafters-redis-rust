@@ -162,6 +162,11 @@ fn main() {
                                 tx.send(Message::NewConnection(stream.try_clone().unwrap()))
                                     .unwrap();
                             }
+                            RedisCommand::Wait(_numreplicas, _timeout) => {
+                                if let Err(e) = send_message_to_client(&stream, ":0\r\n") {
+                                    eprintln!("Error handling client: {}", e);
+                                }
+                            }
                         }
                     }
                 });

@@ -16,6 +16,7 @@ pub enum RedisCommand {
     Info,
     ReplConf(ReplConf),
     PSync,
+    Wait(u64, u64),
 }
 
 fn parse_px(args: &[RespData]) -> Option<u64> {
@@ -78,6 +79,13 @@ pub fn parse_command(data: &RespData) -> Option<RedisCommand> {
             _ => None,
         },
         "PSYNC" => Some(RedisCommand::PSync),
+        "WAIT" => match args {
+            [RespData::BulkString(numreplicas), RespData::BulkString(timeout)] => Some(
+                RedisCommand::Wait(numreplicas.parse().unwrap(), timeout.parse().unwrap()),
+            ),
+            _ => None,
+        },
+
         _ => None,
     }
 }
