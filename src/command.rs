@@ -5,6 +5,7 @@ pub enum ReplConf {
     ListeningPort(u16),
     Capa,
     GetAck,
+    Ack(u64),
 }
 
 #[derive(Debug, PartialEq)]
@@ -73,6 +74,10 @@ pub fn parse_command(data: &RespData) -> Option<RedisCommand> {
                     }
                     "CAPA" => Some(RedisCommand::ReplConf(ReplConf::Capa)),
                     "GETACK" => Some(RedisCommand::ReplConf(ReplConf::GetAck)),
+                    "ACK" => {
+                        let offset = value.parse().ok()?;
+                        Some(RedisCommand::ReplConf(ReplConf::Ack(offset)))
+                    }
                     _ => None,
                 }
             }

@@ -1,9 +1,10 @@
+use std::collections::HashMap;
 use std::io::{Error, ErrorKind, Read, Write};
 use std::net::{TcpListener, TcpStream};
-use std::sync::mpsc;
+use std::sync::{mpsc, Arc, Mutex, RwLock};
 
 use cli::parse_cli;
-use command::{parse_command, RedisCommand};
+use command::{parse_command, RedisCommand, ReplConf};
 use replica::main_of_replica;
 use resp_parser::parse_resp;
 use store::Store;
@@ -22,7 +23,8 @@ enum Message {
     Data(Vec<u8>),
     Set(String, String, Option<u64>),
     Get(TcpStream, String),
-    WaitHandshake(TcpStream),
+    WaitHandshake(TcpStream, u64, u64),
+    UpdateOffset(TcpStream, u64),
 }
 
 fn make_bulk_string(data: &str) -> String {
@@ -52,45 +54,106 @@ fn main() {
 
     main_of_replica(&tx);
 
-    let _ = std::thread::spawn(move || {
-        let mut replicas = vec![];
-        let store = Store::new();
+    let _ = {
+        let tx = tx.clone();
+        std::thread::spawn(move || {
+            let replicas: Arc<Mutex<HashMap<core::net::SocketAddr, (TcpStream, u64)>>> =
+                Arc::new(Mutex::new(HashMap::new()));
+            let store = Store::new();
 
-        for message in rx {
-            match message {
-                Message::NewConnection(stream) => {
-                    println!("New connection established");
-                    replicas.push(stream);
-                }
-                Message::DisconnectReplica(stream) => {
-                    replicas.retain(|r| r.peer_addr().unwrap() != stream.peer_addr().unwrap());
-                }
-                Message::Data(data) => {
-                    for replica in &mut replicas {
-                        replica.write_all(&data).unwrap();
+            let last_write_bytes = Arc::new(RwLock::new(0));
+            let total_write_bytes = Arc::new(RwLock::new(0));
+
+            for message in rx {
+                match message {
+                    Message::NewConnection(stream) => {
+                        println!("New connection established");
+                        let mut replicas = replicas.lock().unwrap();
+                        replicas.insert(stream.peer_addr().unwrap(), (stream, 0));
                     }
-                }
-                Message::Set(key, value, px) => {
-                    store.set(key, value, px);
-                }
-                Message::Get(stream, key) => {
-                    let message = store
-                        .get(&key)
-                        .map(|v| format!("${}\r\n{}\r\n", v.len(), v))
-                        .unwrap_or("$-1\r\n".to_string());
-                    if let Err(e) = send_message_to_client(&stream, &message) {
-                        eprintln!("Error handling client: {}", e);
+                    Message::DisconnectReplica(stream) => {
+                        let mut replicas = replicas.lock().unwrap();
+                        replicas.remove(&stream.peer_addr().unwrap());
                     }
-                }
-                Message::WaitHandshake(stream) => {
-                    let message = format!(":{}\r\n", replicas.len());
-                    if let Err(e) = send_message_to_client(&stream, &message) {
-                        eprintln!("Error handling client: {}", e);
+                    Message::Data(data) => {
+                        let mut replicas = replicas.lock().unwrap();
+
+                        for (replica, offset) in replicas.values_mut() {
+                            replica.write_all(&data).unwrap();
+                            replica.flush().unwrap();
+                        }
+
+                        let mut last_write_bytes = last_write_bytes.write().unwrap();
+                        *last_write_bytes = data.len();
+
+                        let mut total_write_bytes = total_write_bytes.write().unwrap();
+                        *total_write_bytes += data.len();
+                    }
+                    Message::Set(key, value, px) => {
+                        store.set(key, value, px);
+                    }
+                    Message::Get(stream, key) => {
+                        let message = store
+                            .get(&key)
+                            .map(|v| format!("${}\r\n{}\r\n", v.len(), v))
+                            .unwrap_or("$-1\r\n".to_string());
+                        if let Err(e) = send_message_to_client(&stream, &message) {
+                            eprintln!("Error handling client: {}", e);
+                        }
+                    }
+                    Message::WaitHandshake(stream, numreplicas, timeout) => {
+                        if *total_write_bytes.read().unwrap() != 0 {
+                            let data_of_getack = format!(
+                                "*3\r\n{}{}{}",
+                                make_bulk_string("REPLCONF"),
+                                make_bulk_string("GETACK"),
+                                make_bulk_string("*")
+                            );
+                            tx.send(Message::Data(data_of_getack.as_bytes().to_vec()))
+                                .unwrap();
+                        }
+
+                        if numreplicas == 0 {
+                            let message = format!(":{}\r\n", 0);
+                            if let Err(e) = send_message_to_client(&stream, &message) {
+                                eprintln!("Error handling client: {}", e);
+                            }
+
+                            break;
+                        }
+
+                        let replicas = Arc::clone(&replicas);
+                        let last_write_bytes = Arc::clone(&last_write_bytes);
+                        let total_write_bytes = Arc::clone(&total_write_bytes);
+                        std::thread::spawn(move || {
+                            std::thread::sleep(std::time::Duration::from_millis(timeout));
+
+                            let replicas = replicas.lock().unwrap();
+                            let last_write_bytes = last_write_bytes.read().unwrap();
+                            let total_write_bytes = total_write_bytes.read().unwrap();
+                            let synced_replica_count = replicas
+                                .values()
+                                .filter(|(_, offset)| {
+                                    *offset == (*total_write_bytes - *last_write_bytes) as u64
+                                })
+                                .count();
+
+                            let message = format!(":{}\r\n", synced_replica_count);
+                            if let Err(e) = send_message_to_client(&stream, &message) {
+                                eprintln!("Error handling client: {}", e);
+                            }
+                        });
+                    }
+                    Message::UpdateOffset(stream, offset) => {
+                        let mut replicas = replicas.lock().unwrap();
+                        replicas
+                            .entry(stream.peer_addr().unwrap())
+                            .and_modify(|v| v.1 = offset);
                     }
                 }
             }
-        }
-    });
+        });
+    };
 
     for stream in listener.incoming() {
         match stream {
@@ -109,8 +172,22 @@ fn main() {
                         }
 
                         let resp = parse_resp(&buf[..size]).unwrap().1;
-                        let command = parse_command(&resp).unwrap();
-                        match command {
+                        let command = parse_command(&resp).map_or_else(
+                            || {
+                                println!(
+                                    "Invalid command: {}",
+                                    String::from_utf8_lossy(&buf[..size])
+                                );
+                                None
+                            },
+                            Some,
+                        );
+
+                        if command.is_none() {
+                            continue;
+                        }
+
+                        match command.unwrap() {
                             RedisCommand::Ping => {
                                 if let Err(e) = send_message_to_client(&stream, "+PONG\r\n") {
                                     eprintln!("Error handling client: {}", e);
@@ -152,6 +229,10 @@ fn main() {
                                     eprintln!("Error handling client: {}", e);
                                 }
                             }
+                            RedisCommand::ReplConf(ReplConf::Ack(offset)) => {
+                                tx.send(Message::UpdateOffset(stream.try_clone().unwrap(), offset))
+                                    .unwrap();
+                            }
                             RedisCommand::ReplConf(_) => {
                                 if let Err(e) = send_message_to_client(&stream, "+OK\r\n") {
                                     eprintln!("Error handling client: {}", e);
@@ -176,9 +257,13 @@ fn main() {
                                 tx.send(Message::NewConnection(stream.try_clone().unwrap()))
                                     .unwrap();
                             }
-                            RedisCommand::Wait(_numreplicas, _timeout) => {
-                                tx.send(Message::WaitHandshake(stream.try_clone().unwrap()))
-                                    .unwrap();
+                            RedisCommand::Wait(numreplicas, timeout) => {
+                                tx.send(Message::WaitHandshake(
+                                    stream.try_clone().unwrap(),
+                                    numreplicas,
+                                    timeout,
+                                ))
+                                .unwrap();
                             }
                         }
                     }
