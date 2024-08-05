@@ -78,7 +78,7 @@ fn main() {
                     Message::Data(data) => {
                         let mut replicas = replicas.lock().unwrap();
 
-                        for (replica, offset) in replicas.values_mut() {
+                        for (replica, _) in replicas.values_mut() {
                             replica.write_all(&data).unwrap();
                             replica.flush().unwrap();
                         }
