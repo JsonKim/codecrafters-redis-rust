@@ -4,7 +4,7 @@ use std::net::{TcpListener, TcpStream};
 use std::sync::{mpsc, Arc, Mutex, RwLock};
 
 use cli::parse_cli;
-use command::{parse_command, RedisCommand, ReplConf};
+use command::{parse_command, ConfigGet, RedisCommand, ReplConf};
 use replica::main_of_replica;
 use resp_parser::parse_resp;
 use store::Store;
@@ -264,6 +264,28 @@ fn main() {
                                     timeout,
                                 ))
                                 .unwrap();
+                            }
+                            RedisCommand::ConfigGet(ConfigGet::Dir) => {
+                                let args = parse_cli();
+                                let message = format!(
+                                    "*2\r\n{}{}",
+                                    make_bulk_string("dir"),
+                                    make_bulk_string(&args.dir)
+                                );
+                                if let Err(e) = send_message_to_client(&stream, &message) {
+                                    eprintln!("Error handling client: {}", e);
+                                }
+                            }
+                            RedisCommand::ConfigGet(ConfigGet::Dbfilename) => {
+                                let args = parse_cli();
+                                let message = format!(
+                                    "*2\r\n{}{}",
+                                    make_bulk_string("dbfilename"),
+                                    make_bulk_string(&args.dbfilename)
+                                );
+                                if let Err(e) = send_message_to_client(&stream, &message) {
+                                    eprintln!("Error handling client: {}", e);
+                                }
                             }
                         }
                     }

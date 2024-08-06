@@ -9,6 +9,12 @@ pub enum ReplConf {
 }
 
 #[derive(Debug, PartialEq)]
+pub enum ConfigGet {
+    Dir,
+    Dbfilename,
+}
+
+#[derive(Debug, PartialEq)]
 pub enum RedisCommand {
     Ping,
     Echo(String),
@@ -18,6 +24,7 @@ pub enum RedisCommand {
     ReplConf(ReplConf),
     PSync,
     Wait(u64, u64),
+    ConfigGet(ConfigGet),
 }
 
 fn parse_px(args: &[RespData]) -> Option<u64> {
@@ -90,7 +97,20 @@ pub fn parse_command(data: &RespData) -> Option<RedisCommand> {
             ),
             _ => None,
         },
-
+        "CONFIG" => match args {
+            [RespData::BulkString(subcommand), RespData::BulkString(parameter)]
+                if subcommand.to_uppercase() == "GET" =>
+            {
+                if parameter == "dir" {
+                    Some(RedisCommand::ConfigGet(ConfigGet::Dir))
+                } else if parameter == "dir" {
+                    Some(RedisCommand::ConfigGet(ConfigGet::Dbfilename))
+                } else {
+                    None
+                }
+            }
+            _ => None,
+        },
         _ => None,
     }
 }
