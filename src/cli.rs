@@ -11,7 +11,7 @@ impl FromStr for ReplicaInfo {
     type Err = String;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let (host, port_str) = s.split_once(' ').ok_or("Invalid format. Use host:port")?;
+        let (host, port_str) = s.split_once(' ').ok_or("Invalid format. Use host port")?;
 
         let port = port_str.parse::<u16>().map_err(|_| "Invalid port number")?;
 
@@ -29,6 +29,12 @@ pub struct Args {
 
     #[arg(long)]
     pub replicaof: Option<ReplicaInfo>,
+
+    #[arg(long, default_value = "")]
+    pub dir: String,
+
+    #[arg(long, default_value = "")]
+    pub dbfilename: String,
 }
 
 pub fn parse_cli() -> Args {
